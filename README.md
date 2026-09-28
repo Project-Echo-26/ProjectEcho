@@ -46,4 +46,9 @@ Echo Project choice flight controller hardware: [SpeedyBeeF405V4](https://www.sp
 ```
 
 ## Credits
+- [Gavin Ebel](https://github.com/Gav0822)
+- [Justin Puterbaugh]
+- [Trinity Woods]
+- [Ulrich Batanado]
+- [Bryan Agamu]
 - All associated with the [ArduPilot Project](https://github.com/ardupilot/ardupilot)
