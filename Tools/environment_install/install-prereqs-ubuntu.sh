@@ -461,21 +461,26 @@ if false ||
     $APT_GET install python3-venv
 
     # Check if venv already exists in ARDUPILOT_ROOT (check both venv-ardupilot and venv)
-    VENV_PATH=""
-    if [ -d "$ARDUPILOT_ROOT/venv-ardupilot" ]; then
-        VENV_PATH="$ARDUPILOT_ROOT/venv-ardupilot"
-        echo "Found existing venv at $VENV_PATH"
-    elif [ -d "$ARDUPILOT_ROOT/venv" ]; then
-        VENV_PATH="$ARDUPILOT_ROOT/venv"
-        echo "Found existing venv at $VENV_PATH"
-    elif [ -d "$ARDUPILOT_ROOT/.venv" ]; then
-        VENV_PATH="$ARDUPILOT_ROOT/.venv"
-        echo "Found existing venv at $VENV_PATH"
-    else
-        VENV_PATH="$HOME/venv-ardupilot"
-        echo "Creating new venv at $VENV_PATH"
-        python3 -m venv --system-site-packages "$VENV_PATH"
-    fi
+	if [ -n "$VENV_PATH" ]; then
+		echo "Using existing VENV_PATH at $VENV_PATH"
+		python3 -m venv --system-site-packages "$VENV_PATH"
+	else
+	    VENV_PATH=""
+	    if [ -d "$ARDUPILOT_ROOT/venv-ardupilot" ]; then
+	        VENV_PATH="$ARDUPILOT_ROOT/venv-ardupilot"
+	        echo "Found existing venv at $VENV_PATH"
+	    elif [ -d "$ARDUPILOT_ROOT/venv" ]; then
+	        VENV_PATH="$ARDUPILOT_ROOT/venv"
+	        echo "Found existing venv at $VENV_PATH"
+	    elif [ -d "$ARDUPILOT_ROOT/.venv" ]; then
+	        VENV_PATH="$ARDUPILOT_ROOT/.venv"
+	        echo "Found existing venv at $VENV_PATH"
+	    else
+	        VENV_PATH="$HOME/venv-ardupilot"
+	        echo "Creating new venv at $VENV_PATH"
+	        python3 -m venv --system-site-packages "$VENV_PATH"
+	    fi
+	fi
 
     SOURCE_LINE="source $VENV_PATH/bin/activate"
 
