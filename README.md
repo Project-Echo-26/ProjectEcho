@@ -17,7 +17,7 @@ cd ProjectEcho
 ```
 - **IMPORTANT**: Set VENV_PATH environment variable!
 ```Shell
-export VENV_PATH="~/ProjectEcho/.venv"
+export VENV_PATH="$HOME/ProjectEcho/.venv"
 ```
 - Install required packages
 ```
