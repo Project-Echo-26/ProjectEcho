@@ -353,6 +353,138 @@ mode land
 
 - Repeat using Drone 2's MAVProxy terminal
 
+## Local Telemetry Receiver Test (SITL)
+
+This test checks that telemetry from both SITL drones can be received, identified by system ID, and updated when one drone changes altitude. The commands below use the project paths from this README.
+
+### Start the Two-Drone Simulation
+
+- In the Gazebo terminal
+
+```bash
+cd ~/ProjectEcho/ardupilot_gazebo/worlds
+gz sim -v4 -r iris_two_basic.sdf
+```
+
+- In Drone 1's terminal, start SITL
+
+```bash
+cd ~/ProjectEcho
+./Tools/autotest/sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON -I0 --sysid 1 --use-dir copter0 --map --console
+```
+
+- In Drone 2's terminal, start the second SITL instance
+
+```bash
+cd ~/ProjectEcho
+./Tools/autotest/sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON -I1 --sysid 2 --use-dir copter1
+```
+
+- Wait for both SITL instances to connect
+
+### Start the Telemetry Receivers
+
+- Place the receiver script at `~/ProjectEcho/telemetry_poc/receiver.py`
+- Confirm that `pymavlink` is available to Python
+
+```bash
+python3 -c "from pymavlink import mavutil; print('pymavlink is available')"
+```
+
+- Open two additional WSL terminals and start one receiver in each
+
+```bash
+cd ~/ProjectEcho/telemetry_poc
+python3 receiver.py --port 14600
+```
+
+```bash
+cd ~/ProjectEcho/telemetry_poc
+python3 receiver.py --port 14601
+```
+
+### Forward Telemetry to the Receivers
+
+- In Drone 1's MAVProxy terminal, check the current outputs
+
+```text
+output
+```
+
+- Keep the normal output and add the shared receiver if it is not already listed
+
+```text
+output add 127.0.0.1:14600
+```
+
+- In Drone 2's MAVProxy terminal, check the current outputs
+
+```text
+output
+```
+
+- Keep the normal output and add both receiver ports if they are not already listed
+
+```text
+output add 127.0.0.1:14600
+output add 127.0.0.1:14601
+```
+
+- Check `output` in each MAVProxy terminal to confirm the test destinations are listed only once
+- Do not remove the normal MAVProxy outputs
+
+### Verify and Test Telemetry
+
+- The receiver on port `14600` should display messages from System 1 and System 2
+- The receiver on port `14601` should display messages from System 2
+- Messages include heartbeat and position data, with the system ID shown in the receiver output
+
+#### Test Route Recovery
+
+- In Drone 2's MAVProxy terminal, temporarily remove its route to the shared receiver
+
+```text
+output remove 127.0.0.1:14600
+```
+
+- Port `14600` should show System 1 only; port `14601` should continue showing System 2
+- Restore the route
+
+```text
+output add 127.0.0.1:14600
+```
+
+- Port `14600` should show both system IDs again
+
+#### Test Changing Altitude
+
+- In Drone 2's MAVProxy terminal, enter these commands one at a time
+
+```text
+mode guided
+arm throttle
+takeoff 3
+```
+
+- Watch port `14600`: System 2's `relative_alt` should rise to about 3 m, while System 1 remains near 0 m
+- Land Drone 2
+
+```text
+land
+```
+
+- Confirm System 2's `relative_alt` returns to about 0 m
+
+**Troubleshooting:** During the first altitude check, port `14601` showed the altitude change while the combined receiver on port `14600` continued showing 0 m for System 2. Restarting the receiver on port `14600` resolved the display mismatch. If this happens, check Drone 2's `output` list, then restart only the receiver on port `14600` while Drone 2 is still sending telemetry.
+
+### Test Results and Limitations
+
+- Port `14600` received and identified telemetry from both system IDs
+- Port `14601` received System 2 telemetry
+- Removing Drone 2's route to port `14600` removed System 2 from that receiver; restoring the route brought it back
+- During a simulated takeoff to 3 m and landing, the shared receiver showed System 2's altitude rise to about 3 m and return to about 0 m, while System 1 remained near 0 m
+- This test used local UDP forwarding through `127.0.0.1`. Each SITL instance sent telemetry directly to the receiver; neither drone relayed the other drone's messages. This test does not demonstrate a wireless mesh network, communication range, packet loss, or latency.
+
 ## Mission Planner Setup
 
 Mission Planner runs on Windows and connects to both SITL instances through UDP.
@@ -455,7 +587,7 @@ A value near 1.0 indicates the simulation is running close to real time.
   
 ## Credits
 - [Gavin Ebel](https://github.com/Gav0822)
-- [Justin Puterbaugh] (https://github.com/Jputerbaugh)
+- [Justin Puterbaugh](https://github.com/Jputerbaugh)
 - [Trinity Woods]
 - [Ulrich Batanado]
 - [Bryan Agamu]
