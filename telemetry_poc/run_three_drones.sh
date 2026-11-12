@@ -9,10 +9,15 @@ WORLD="$GAZEBO_ROOT/worlds/iris_three_basic.sdf"
 SIM_VEHICLE="$PROJECT_ROOT/Tools/autotest/sim_vehicle.py"
 MESH_ROUTER="$SCRIPT_DIR/mesh_router.py"
 RECEIVER="$SCRIPT_DIR/receiver.py"
+MAVPROXY_PANE="$SCRIPT_DIR/mavproxy_pane.sh"
+DASHBOARD_SCRIPT="$SCRIPT_DIR/open_three_drone_dashboard.ps1"
 
 STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/projectecho/three-drone-mesh"
 SITL_STATE_DIR="$STATE_ROOT/sitl"
 SITL_LOG_DIR="$STATE_ROOT/sitl-logs"
+LAUNCHER_PID_FILE="$STATE_ROOT/launcher.pid"
+WINDOWS_POWERSHELL="${WINDOWS_POWERSHELL:-/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe}"
+WINDOWS_TERMINAL_DISTRO="${WINDOWS_TERMINAL_DISTRO:-${WSL_DISTRO_NAME:-Ubuntu-24.04}}"
 
 ROUTER_PORT_1=14610
 ROUTER_PORT_2=14611
@@ -49,10 +54,15 @@ require_command() {
     fi
 }
 
-for command_name in gz ss setsid ps awk grep tail; do
+for command_name in gz ss setsid ps awk grep tail wslpath; do
     require_command "$command_name"
 done
 require_command "$PYTHON_BIN"
+if [[ ! -x "$WINDOWS_POWERSHELL" ]]; then
+    printf 'Windows PowerShell was not found at %s.\n' "$WINDOWS_POWERSHELL" >&2
+    printf 'Set WINDOWS_POWERSHELL to its WSL-accessible path.\n' >&2
+    exit 1
+fi
 
 if [[ -x "$PROJECT_ROOT/.venv/bin/mavproxy.py" ]]; then
     MAVPROXY_SCRIPT="$PROJECT_ROOT/.venv/bin/mavproxy.py"
@@ -81,6 +91,10 @@ if [[ ! -f "$GAZEBO_PLUGIN" ]]; then
     printf 'Build ardupilot_gazebo as described in README.md.\n' >&2
     exit 1
 fi
+if [[ ! -f "$MAVPROXY_PANE" || ! -f "$DASHBOARD_SCRIPT" ]]; then
+    printf 'Windows Terminal dashboard scripts are missing.\n' >&2
+    exit 1
+fi
 "$PYTHON_BIN" -c 'import pymavlink' || {
     printf 'pymavlink is not available to %s.\n' "$PYTHON_BIN" >&2
     exit 1
@@ -92,7 +106,28 @@ if [[ -z "$WINDOWS_HOST_IP" ]] && command -v ip >/dev/null 2>&1; then
     WINDOWS_HOST_IP="$(ip route show default 2>/dev/null | awk 'NR == 1 {print $3}')"
 fi
 
-declare -a MAVPROXY_GCS_OUTPUT=()
+WINDOWS_DASHBOARD_SCRIPT="$(wslpath -w "$DASHBOARD_SCRIPT")"
+declare -a WINDOWS_DASHBOARD_ARGUMENTS=(
+    -Distro "$WINDOWS_TERMINAL_DISTRO"
+    -ProjectRoot "$PROJECT_ROOT"
+    -StateRoot "$STATE_ROOT"
+    -LauncherPid "$$"
+    -LauncherPidFile "$LAUNCHER_PID_FILE"
+    -PythonBin "$PYTHON_BIN"
+    -MavproxyScript "$MAVPROXY_SCRIPT"
+    -MavproxyPaneScript "$MAVPROXY_PANE"
+    -GcsMode "$MESH_GCS_MODE"
+)
+if [[ -n "$WINDOWS_HOST_IP" ]]; then
+    WINDOWS_DASHBOARD_ARGUMENTS+=(-WindowsHostIP "$WINDOWS_HOST_IP")
+fi
+
+if ! "$WINDOWS_POWERSHELL" -NoLogo -NoProfile -ExecutionPolicy Bypass \
+    -File "$WINDOWS_DASHBOARD_SCRIPT" "${WINDOWS_DASHBOARD_ARGUMENTS[@]}" -DryRun >/dev/null; then
+    printf 'Windows Terminal dashboard preflight failed.\n' >&2
+    exit 1
+fi
+
 declare -a ROUTER_GCS_OUTPUT=()
 if [[ "$MESH_GCS_MODE" == "mesh-fed" ]]; then
     if [[ -z "$WINDOWS_HOST_IP" ]]; then
@@ -103,7 +138,6 @@ if [[ "$MESH_GCS_MODE" == "mesh-fed" ]]; then
     printf 'Mesh-fed Mission Planner telemetry will use %s:%s (read-only).\n' \
         "$WINDOWS_HOST_IP" "$GCS_PORT"
 elif [[ -n "$WINDOWS_HOST_IP" ]]; then
-    MAVPROXY_GCS_OUTPUT+=(--out="$WINDOWS_HOST_IP:$GCS_PORT")
     printf 'Direct Mission Planner telemetry will use %s:%s.\n' "$WINDOWS_HOST_IP" "$GCS_PORT"
 else
     printf 'No Windows host IP detected; set WINDOWS_HOST_IP to enable Mission Planner output.\n'
@@ -232,6 +266,10 @@ on_exit() {
     local status=$?
     trap - EXIT INT TERM HUP
     stop_processes
+    if [[ -f "$LAUNCHER_PID_FILE" ]] \
+        && [[ "$(<"$LAUNCHER_PID_FILE")" == "$$" ]]; then
+        rm -f -- "$LAUNCHER_PID_FILE"
+    fi
     return "$status"
 }
 
@@ -239,6 +277,8 @@ trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+
+printf '%s\n' "$$" >"$LAUNCHER_PID_FILE"
 
 cd "$PROJECT_ROOT"
 start_process gazebo gz sim -v4 -r "$WORLD"
@@ -272,26 +312,14 @@ wait_for_ports tcp 60 5760 5770 5780 || {
     exit 1
 }
 
-start_process mavproxy-drone-1 "$PYTHON_BIN" "$MAVPROXY_SCRIPT" \
-    --master=tcp:127.0.0.1:5760 \
-    --out="127.0.0.1:$ROUTER_PORT_1" \
-    "${MAVPROXY_GCS_OUTPUT[@]}" \
-    --daemon
-start_process mavproxy-drone-2 "$PYTHON_BIN" "$MAVPROXY_SCRIPT" \
-    --master=tcp:127.0.0.1:5770 \
-    --out="127.0.0.1:$ROUTER_PORT_2" \
-    "${MAVPROXY_GCS_OUTPUT[@]}" \
-    --daemon
-start_process mavproxy-drone-3 "$PYTHON_BIN" "$MAVPROXY_SCRIPT" \
-    --master=tcp:127.0.0.1:5780 \
-    --out="127.0.0.1:$ROUTER_PORT_3" \
-    "${MAVPROXY_GCS_OUTPUT[@]}" \
-    --daemon
+"$WINDOWS_POWERSHELL" -NoLogo -NoProfile -ExecutionPolicy Bypass \
+    -File "$WINDOWS_DASHBOARD_SCRIPT" "${WINDOWS_DASHBOARD_ARGUMENTS[@]}"
 
-printf '\nThree-drone mesh simulation is running.\n'
+printf '\nThree-drone mesh simulation is running in the six-pane Windows Terminal dashboard.\n'
 printf 'Peer telemetry logs: %s/receiver-drone-*.log\n' "$STATE_ROOT"
 printf 'All logs: %s\n' "$STATE_ROOT"
-printf 'Connect Mission Planner using UDP port %s. Press Ctrl+C here to stop the stack.\n' "$GCS_PORT"
+printf 'Connect Mission Planner using UDP port %s. Keep this launcher terminal open; press Ctrl+C here to stop the stack.\n' \
+    "$GCS_PORT"
 
 while true; do
     for index in "${!PROCESS_PIDS[@]}"; do

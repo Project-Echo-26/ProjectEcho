@@ -288,16 +288,25 @@ The script launches the three-drone Gazebo world, three SITL instances, the
 mesh router, and one peer telemetry receiver per drone. It keeps logs and SITL
 state under `~/.local/state/projectecho/three-drone-mesh/` (or
 `$XDG_STATE_HOME/projectecho/three-drone-mesh/`) and stops the processes it
-started when you press Ctrl+C.
+started when you press Ctrl+C in the WSL terminal where the launcher was run.
 
-The launcher runs MAVProxy in the background rather than opening separate
-MAVProxy consoles. By default, each MAVProxy sends its vehicle directly to
-Mission Planner on UDP port `14550`, using the WSL default gateway as the
-Windows host address. If that address is not detected correctly, set
-`WINDOWS_HOST_IP` before launching. Peer mesh telemetry is printed in the
-`receiver-drone-1.log` and `receiver-drone-2.log` files in the state directory.
-The mesh settings can be overridden with `MESH_RANGE_M`, `MESH_BANDWIDTH`,
-`MESH_LATENCY_MS`, `MESH_PACKET_LOSS`, and `MESH_MAX_HOPS`.
+The launcher opens a maximized Windows Terminal window with six panes. The top
+row contains one interactive MAVProxy console per drone; the bottom row follows
+each drone's peer telemetry receiver log. Keep the original WSL launcher
+terminal open to manage the simulation. The panes close their MAVProxy sessions
+when the launcher exits. Windows Terminal and Windows PowerShell must be
+available on Windows; set `WINDOWS_POWERSHELL` if PowerShell is installed at a
+non-default WSL-mounted path.
+
+By default, each MAVProxy sends its vehicle directly to Mission Planner on UDP
+port `14550`, using the WSL default gateway as the Windows host address. If that
+address is not detected correctly, set `WINDOWS_HOST_IP` before launching. The
+dashboard uses the `Ubuntu-24.04` WSL distribution by default; override it with
+`WINDOWS_TERMINAL_DISTRO` if your distribution has a different name. Peer
+telemetry logs are `receiver-drone-1.log`, `receiver-drone-2.log`, and
+`receiver-drone-3.log` in the state directory. The mesh settings can be
+overridden with `MESH_RANGE_M`, `MESH_BANDWIDTH`, `MESH_LATENCY_MS`,
+`MESH_PACKET_LOSS`, and `MESH_MAX_HOPS`.
 
 To display telemetry that has actually traversed the simulated mesh in Mission
 Planner, stop the normal run and start in mesh-fed mode:
@@ -317,13 +326,12 @@ is running inside WSL.
 
 #### Control the SITL vehicles
 
-The launcher keeps MAVProxy in the background, so it does not open interactive
-MAVProxy terminals. To control the vehicles, open Mission Planner on Windows,
-select the **UDP** connection, and connect on port `14550`. All three SITL
-instances send telemetry through that connection with system IDs 1, 2, and 3
-in the default `direct` mode. Use Mission Planner's vehicle selection and
-Flight Data controls to choose a vehicle and send commands. Mesh-fed mode is
-for viewing routed telemetry only; use the default mode for control.
+Each top-row MAVProxy console is connected to its corresponding SITL instance
+and accepts vehicle commands. Mission Planner can also connect on UDP port
+`14550` in the default `direct` mode; all three SITL instances use system IDs 1,
+2, and 3. Use Mission Planner's vehicle selection and Flight Data controls to
+choose a vehicle and send commands. In `mesh-fed` mode, Mission Planner
+receives routed telemetry only; the MAVProxy consoles remain connected to SITL.
 
 If arming is rejected with `PreArm: Motors: Check frame class and type`, set
 `FRAME_CLASS` and `FRAME_TYPE` to `1` for each vehicle in Mission Planner's
