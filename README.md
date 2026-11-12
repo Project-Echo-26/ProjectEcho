@@ -299,6 +299,21 @@ launching. Peer mesh telemetry is printed in the
 The mesh settings can be overridden with `MESH_RANGE_M`, `MESH_BANDWIDTH`,
 `MESH_LATENCY_MS`, `MESH_PACKET_LOSS`, and `MESH_MAX_HOPS`.
 
+#### Control the SITL vehicles
+
+The launcher keeps MAVProxy in the background, so it does not open interactive
+MAVProxy terminals. To control the vehicles, open Mission Planner on Windows,
+select the **UDP** connection, and connect on port `14550`. Both SITL instances
+send telemetry through that connection with system IDs 1 and 2. Use Mission
+Planner's vehicle selection and Flight Data controls to choose a vehicle and
+send commands. The mesh router is telemetry-only; control commands use the
+direct MAVProxy-to-GCS connection.
+
+If arming is rejected with `PreArm: Motors: Check frame class and type`, set
+`FRAME_CLASS` and `FRAME_TYPE` to `1` for each vehicle in Mission Planner's
+parameter list, write the parameters, and reboot that SITL instance. Only
+control these simulated vehicles.
+
 ### Terminal 1 — Gazebo
 
 - Open Ubuntu and start the two-drone world
