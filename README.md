@@ -274,6 +274,31 @@ This places the drones 3 meters apart.
 
 ## Run Multiple Drones
 
+### Automated two-drone mesh launcher
+
+After building the SITL binary and the `ardupilot_gazebo` plugin as described
+above, start the complete simulation with:
+
+```bash
+cd ~/ProjectEcho
+bash telemetry_poc/run_two_drones.sh
+```
+
+The script launches the two-drone Gazebo world, two SITL instances, the mesh
+router, and one peer telemetry receiver per drone. It keeps logs and SITL state
+under `~/.local/state/projectecho/two-drone-mesh/` (or
+`$XDG_STATE_HOME/projectecho/two-drone-mesh/`) and stops the processes it
+started when you press Ctrl+C.
+
+The launcher runs MAVProxy in the background rather than opening separate
+MAVProxy consoles. It sends both vehicles' telemetry to Mission Planner on
+UDP port `14550`, using the WSL default gateway as the Windows host address.
+If that address is not detected correctly, set `WINDOWS_HOST_IP` before
+launching. Peer mesh telemetry is printed in the
+`receiver-drone-1.log` and `receiver-drone-2.log` files in the state directory.
+The mesh settings can be overridden with `MESH_RANGE_M`, `MESH_BANDWIDTH`,
+`MESH_LATENCY_MS`, `MESH_PACKET_LOSS`, and `MESH_MAX_HOPS`.
+
 ### Terminal 1 — Gazebo
 
 - Open Ubuntu and start the two-drone world
