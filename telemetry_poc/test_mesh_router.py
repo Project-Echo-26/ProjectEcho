@@ -1,8 +1,11 @@
 # AP_FLAKE8_CLEAN
 
+import argparse
 import math
 import struct
 import unittest
+from unittest.mock import call
+from unittest.mock import Mock
 
 from mesh_router import EARTH_RADIUS_M
 from mesh_router import GLOBAL_POSITION_INT_ID
@@ -11,6 +14,8 @@ from mesh_router import MeshNode
 from mesh_router import MeshRouter
 from mesh_router import _x25_crc
 from mesh_router import iter_mavlink_frames
+from mesh_router import parse_udp_destination
+from mesh_router import send_mesh_frame
 
 
 CRC_EXTRA = {
@@ -66,6 +71,33 @@ class MeshRouterTest(unittest.TestCase):
             for system_id, east_m in enumerate(east_positions, start=1)
         ]
         return MeshRouter(nodes, **kwargs)
+
+    def test_parse_udp_destination(self):
+        self.assertEqual(parse_udp_destination("127.0.0.1:14550"), ("127.0.0.1", 14550))
+        with self.assertRaises(argparse.ArgumentTypeError):
+            parse_udp_destination("127.0.0.1:0")
+
+    def test_mesh_frame_is_sent_to_peer_and_optional_gcs(self):
+        output_socket = Mock()
+        frame = b"mesh telemetry"
+        peer = ("127.0.0.1", 14620)
+        gcs = ("127.0.0.1", 14550)
+
+        send_mesh_frame(output_socket, frame, peer, gcs)
+
+        self.assertEqual(
+            output_socket.sendto.call_args_list,
+            [call(frame, peer), call(frame, gcs)],
+        )
+
+    def test_mesh_frame_without_gcs_output_still_reaches_peer(self):
+        output_socket = Mock()
+        frame = b"mesh telemetry"
+        peer = ("127.0.0.1", 14620)
+
+        send_mesh_frame(output_socket, frame, peer, None)
+
+        output_socket.sendto.assert_called_once_with(frame, peer)
 
     def test_parser_accepts_valid_mavlink_v1_and_v2_frames(self):
         payload = bytes(9)

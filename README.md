@@ -274,40 +274,56 @@ This places the drones 3 meters apart.
 
 ## Run Multiple Drones
 
-### Automated two-drone mesh launcher
+### Automated three-drone mesh launcher
 
 After building the SITL binary and the `ardupilot_gazebo` plugin as described
 above, start the complete simulation with:
 
 ```bash
 cd ~/ProjectEcho
-bash telemetry_poc/run_two_drones.sh
+bash telemetry_poc/run_three_drones.sh
 ```
 
-The script launches the two-drone Gazebo world, two SITL instances, the mesh
-router, and one peer telemetry receiver per drone. It keeps logs and SITL state
-under `~/.local/state/projectecho/two-drone-mesh/` (or
-`$XDG_STATE_HOME/projectecho/two-drone-mesh/`) and stops the processes it
+The script launches the three-drone Gazebo world, three SITL instances, the
+mesh router, and one peer telemetry receiver per drone. It keeps logs and SITL
+state under `~/.local/state/projectecho/three-drone-mesh/` (or
+`$XDG_STATE_HOME/projectecho/three-drone-mesh/`) and stops the processes it
 started when you press Ctrl+C.
 
 The launcher runs MAVProxy in the background rather than opening separate
-MAVProxy consoles. It sends both vehicles' telemetry to Mission Planner on
-UDP port `14550`, using the WSL default gateway as the Windows host address.
-If that address is not detected correctly, set `WINDOWS_HOST_IP` before
-launching. Peer mesh telemetry is printed in the
+MAVProxy consoles. By default, each MAVProxy sends its vehicle directly to
+Mission Planner on UDP port `14550`, using the WSL default gateway as the
+Windows host address. If that address is not detected correctly, set
+`WINDOWS_HOST_IP` before launching. Peer mesh telemetry is printed in the
 `receiver-drone-1.log` and `receiver-drone-2.log` files in the state directory.
 The mesh settings can be overridden with `MESH_RANGE_M`, `MESH_BANDWIDTH`,
 `MESH_LATENCY_MS`, `MESH_PACKET_LOSS`, and `MESH_MAX_HOPS`.
+
+To display telemetry that has actually traversed the simulated mesh in Mission
+Planner, stop the normal run and start in mesh-fed mode:
+
+```bash
+MESH_GCS_MODE=mesh-fed MESH_RANGE_M=100 bash telemetry_poc/run_three_drones.sh
+```
+
+In this mode, MAVProxy sends telemetry to the mesh router and the router sends
+only mesh-forwarded `HEARTBEAT` and `GLOBAL_POSITION_INT` messages to Mission
+Planner on UDP port `14550`. This is a read-only demonstration; it does not
+forward control commands. The closest drone pair starts about 3 m apart. To
+demonstrate the range limit, stop the stack and restart with `MESH_RANGE_M=2`;
+Mission Planner should stop receiving new mesh telemetry. Use
+`WINDOWS_HOST_IP=127.0.0.1` instead of the default gateway if Mission Planner
+is running inside WSL.
 
 #### Control the SITL vehicles
 
 The launcher keeps MAVProxy in the background, so it does not open interactive
 MAVProxy terminals. To control the vehicles, open Mission Planner on Windows,
-select the **UDP** connection, and connect on port `14550`. Both SITL instances
-send telemetry through that connection with system IDs 1 and 2. Use Mission
-Planner's vehicle selection and Flight Data controls to choose a vehicle and
-send commands. The mesh router is telemetry-only; control commands use the
-direct MAVProxy-to-GCS connection.
+select the **UDP** connection, and connect on port `14550`. All three SITL
+instances send telemetry through that connection with system IDs 1, 2, and 3
+in the default `direct` mode. Use Mission Planner's vehicle selection and
+Flight Data controls to choose a vehicle and send commands. Mesh-fed mode is
+for viewing routed telemetry only; use the default mode for control.
 
 If arming is rejected with `PreArm: Motors: Check frame class and type`, set
 `FRAME_CLASS` and `FRAME_TYPE` to `1` for each vehicle in Mission Planner's

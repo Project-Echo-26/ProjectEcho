@@ -292,6 +292,28 @@ def parse_node(value: str) -> MeshNode:
     return MeshNode(system_id, input_port, output_port)
 
 
+def parse_udp_destination(value: str) -> Tuple[str, int]:
+    try:
+        host, port_text = value.rsplit(":", 1)
+        port = int(port_text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Use HOST:PORT for the GCS UDP destination") from exc
+    if not host or ":" in host or not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("Use a valid IPv4/hostname and UDP port")
+    return host, port
+
+
+def send_mesh_frame(
+    output_socket: socket.socket,
+    frame: bytes,
+    peer_destination: Tuple[str, int],
+    gcs_destination: Optional[Tuple[str, int]],
+) -> None:
+    output_socket.sendto(frame, peer_destination)
+    if gcs_destination is not None:
+        output_socket.sendto(frame, gcs_destination)
+
+
 def run(args: argparse.Namespace) -> None:
     nodes = args.node
     ports = [node.input_port for node in nodes] + [node.output_port for node in nodes]
@@ -329,6 +351,12 @@ def run(args: argparse.Namespace) -> None:
             args.packet_loss * 100,
             args.max_hops,
         )
+        if args.gcs_output is not None:
+            logging.info(
+                "Mesh-forwarded telemetry also sent to GCS %s:%d",
+                args.gcs_output[0],
+                args.gcs_output[1],
+            )
         for node in nodes:
             logging.info(
                 "System %d: MAVProxy input 127.0.0.1:%d -> peer receiver 127.0.0.1:%d",
@@ -350,7 +378,12 @@ def run(args: argparse.Namespace) -> None:
             now = time.monotonic()
             for destination_id, frame in router.pop_due(now):
                 destination = router.nodes[destination_id]
-                output_socket.sendto(frame, ("127.0.0.1", destination.output_port))
+                send_mesh_frame(
+                    output_socket,
+                    frame,
+                    ("127.0.0.1", destination.output_port),
+                    args.gcs_output,
+                )
     finally:
         selector.close()
         output_socket.close()
@@ -369,6 +402,12 @@ def main() -> None:
         required=True,
         metavar="SYSTEM_ID:INPUT_PORT:OUTPUT_PORT",
         help="MAVProxy UDP input and peer telemetry receiver port; repeat per drone",
+    )
+    parser.add_argument(
+        "--gcs-output",
+        type=parse_udp_destination,
+        metavar="HOST:PORT",
+        help="also send mesh-forwarded telemetry to a ground station (read-only)",
     )
     parser.add_argument("--range-m", type=float, default=100.0, help="Radio range in meters")
     parser.add_argument(

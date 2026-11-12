@@ -5,25 +5,34 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 GAZEBO_ROOT="$PROJECT_ROOT/ardupilot_gazebo"
-WORLD="$GAZEBO_ROOT/worlds/iris_two_basic.sdf"
+WORLD="$GAZEBO_ROOT/worlds/iris_three_basic.sdf"
 SIM_VEHICLE="$PROJECT_ROOT/Tools/autotest/sim_vehicle.py"
 MESH_ROUTER="$SCRIPT_DIR/mesh_router.py"
 RECEIVER="$SCRIPT_DIR/receiver.py"
 
-STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/projectecho/two-drone-mesh"
+STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/projectecho/three-drone-mesh"
 SITL_STATE_DIR="$STATE_ROOT/sitl"
 SITL_LOG_DIR="$STATE_ROOT/sitl-logs"
 
 ROUTER_PORT_1=14610
 ROUTER_PORT_2=14611
+ROUTER_PORT_3=14612
 RECEIVER_PORT_1=14620
 RECEIVER_PORT_2=14621
+RECEIVER_PORT_3=14622
 
 MESH_RANGE_M="${MESH_RANGE_M:-100}"
 MESH_BANDWIDTH="${MESH_BANDWIDTH:-57600}"
 MESH_LATENCY_MS="${MESH_LATENCY_MS:-20}"
 MESH_PACKET_LOSS="${MESH_PACKET_LOSS:-0.01}"
 MESH_MAX_HOPS="${MESH_MAX_HOPS:-4}"
+MESH_GCS_MODE="${MESH_GCS_MODE:-direct}"
+GCS_PORT=14550
+
+if [[ "$MESH_GCS_MODE" != "direct" && "$MESH_GCS_MODE" != "mesh-fed" ]]; then
+    printf 'MESH_GCS_MODE must be direct or mesh-fed.\n' >&2
+    exit 2
+fi
 
 if [[ -z "${PYTHON_BIN:-}" ]]; then
     if [[ -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
@@ -57,8 +66,9 @@ GAZEBO_PLUGIN="$GAZEBO_ROOT/build/libArduPilotPlugin.so"
 
 if [[ ! -f "$WORLD" \
     || ! -f "$GAZEBO_ROOT/models/iris_with_ardupilot/model.sdf" \
-    || ! -f "$GAZEBO_ROOT/models/iris_with_ardupilot_2/model.sdf" ]]; then
-    printf 'Two-drone Gazebo world or model files are missing.\n' >&2
+    || ! -f "$GAZEBO_ROOT/models/iris_with_ardupilot_2/model.sdf" \
+    || ! -f "$GAZEBO_ROOT/models/iris_with_ardupilot_3/model.sdf" ]]; then
+    printf 'Three-drone Gazebo world or model files are missing.\n' >&2
     exit 1
 fi
 if [[ ! -x "$SITL_BINARY" ]]; then
@@ -76,6 +86,28 @@ fi
     exit 1
 }
 "$PYTHON_BIN" "$MAVPROXY_SCRIPT" --version >/dev/null
+
+WINDOWS_HOST_IP="${WINDOWS_HOST_IP:-}"
+if [[ -z "$WINDOWS_HOST_IP" ]] && command -v ip >/dev/null 2>&1; then
+    WINDOWS_HOST_IP="$(ip route show default 2>/dev/null | awk 'NR == 1 {print $3}')"
+fi
+
+declare -a MAVPROXY_GCS_OUTPUT=()
+declare -a ROUTER_GCS_OUTPUT=()
+if [[ "$MESH_GCS_MODE" == "mesh-fed" ]]; then
+    if [[ -z "$WINDOWS_HOST_IP" ]]; then
+        printf 'Set WINDOWS_HOST_IP for mesh-fed Mission Planner telemetry.\n' >&2
+        exit 1
+    fi
+    ROUTER_GCS_OUTPUT+=(--gcs-output "$WINDOWS_HOST_IP:$GCS_PORT")
+    printf 'Mesh-fed Mission Planner telemetry will use %s:%s (read-only).\n' \
+        "$WINDOWS_HOST_IP" "$GCS_PORT"
+elif [[ -n "$WINDOWS_HOST_IP" ]]; then
+    MAVPROXY_GCS_OUTPUT+=(--out="$WINDOWS_HOST_IP:$GCS_PORT")
+    printf 'Direct Mission Planner telemetry will use %s:%s.\n' "$WINDOWS_HOST_IP" "$GCS_PORT"
+else
+    printf 'No Windows host IP detected; set WINDOWS_HOST_IP to enable Mission Planner output.\n'
+fi
 
 export GZ_SIM_SYSTEM_PLUGIN_PATH="$GAZEBO_ROOT/build${GZ_SIM_SYSTEM_PLUGIN_PATH:+:$GZ_SIM_SYSTEM_PLUGIN_PATH}"
 export GZ_SIM_RESOURCE_PATH="$GAZEBO_ROOT/models:$GAZEBO_ROOT/worlds${GZ_SIM_RESOURCE_PATH:+:$GZ_SIM_RESOURCE_PATH}"
@@ -96,7 +128,8 @@ check_port_available() {
     fi
 }
 
-for port in 9002 9012 "$ROUTER_PORT_1" "$ROUTER_PORT_2" "$RECEIVER_PORT_1" "$RECEIVER_PORT_2" 5760 5770; do
+for port in 9002 9012 9022 "$ROUTER_PORT_1" "$ROUTER_PORT_2" "$ROUTER_PORT_3" \
+    "$RECEIVER_PORT_1" "$RECEIVER_PORT_2" "$RECEIVER_PORT_3" 5760 5770 5780; do
     check_port_available "$port"
 done
 
@@ -209,7 +242,7 @@ trap 'exit 129' HUP
 
 cd "$PROJECT_ROOT"
 start_process gazebo gz sim -v4 -r "$WORLD"
-wait_for_ports udp 45 9002 9012 || {
+wait_for_ports udp 45 9002 9012 9022 || {
     printf 'Gazebo did not bind both ArduPilot ports; see %s/gazebo.log\n' "$STATE_ROOT" >&2
     exit 1
 }
@@ -217,6 +250,8 @@ wait_for_ports udp 45 9002 9012 || {
 start_process mesh-router "$PYTHON_BIN" "$MESH_ROUTER" \
     --node "1:$ROUTER_PORT_1:$RECEIVER_PORT_1" \
     --node "2:$ROUTER_PORT_2:$RECEIVER_PORT_2" \
+    --node "3:$ROUTER_PORT_3:$RECEIVER_PORT_3" \
+    "${ROUTER_GCS_OUTPUT[@]}" \
     --range-m "$MESH_RANGE_M" \
     --bandwidth "$MESH_BANDWIDTH" \
     --latency-ms "$MESH_LATENCY_MS" \
@@ -224,46 +259,39 @@ start_process mesh-router "$PYTHON_BIN" "$MESH_ROUTER" \
     --max-hops "$MESH_MAX_HOPS"
 start_process receiver-drone-1 "$PYTHON_BIN" "$RECEIVER" --port "$RECEIVER_PORT_1"
 start_process receiver-drone-2 "$PYTHON_BIN" "$RECEIVER" --port "$RECEIVER_PORT_2"
+start_process receiver-drone-3 "$PYTHON_BIN" "$RECEIVER" --port "$RECEIVER_PORT_3"
 
 start_process sitl-manager env DISPLAY= TMPDIR="$SITL_LOG_DIR" \
     "$PYTHON_BIN" "$SIM_VEHICLE" \
     -v ArduCopter -f gazebo-iris --model JSON \
-    -I0 -n2 --auto-sysid \
+    -I0 -n3 --auto-sysid \
     --use-dir "$SITL_STATE_DIR" \
     --no-rebuild --no-mavproxy
-wait_for_ports tcp 60 5760 5770 || {
+wait_for_ports tcp 60 5760 5770 5780 || {
     printf 'SITL instances did not open their MAVLink ports; see %s/sitl-manager.log\n' "$STATE_ROOT" >&2
     exit 1
 }
 
-WINDOWS_HOST_IP="${WINDOWS_HOST_IP:-}"
-if [[ -z "$WINDOWS_HOST_IP" ]] && command -v ip >/dev/null 2>&1; then
-    WINDOWS_HOST_IP="$(ip route show default 2>/dev/null | awk 'NR == 1 {print $3}')"
-fi
-
-declare -a GCS_OUTPUT=()
-if [[ -n "$WINDOWS_HOST_IP" ]]; then
-    GCS_OUTPUT+=(--out="$WINDOWS_HOST_IP:14550")
-    printf 'Mission Planner telemetry will be sent to %s:14550\n' "$WINDOWS_HOST_IP"
-else
-    printf 'No Windows host IP detected; set WINDOWS_HOST_IP to enable Mission Planner output.\n'
-fi
-
 start_process mavproxy-drone-1 "$PYTHON_BIN" "$MAVPROXY_SCRIPT" \
     --master=tcp:127.0.0.1:5760 \
     --out="127.0.0.1:$ROUTER_PORT_1" \
-    "${GCS_OUTPUT[@]}" \
+    "${MAVPROXY_GCS_OUTPUT[@]}" \
     --daemon
 start_process mavproxy-drone-2 "$PYTHON_BIN" "$MAVPROXY_SCRIPT" \
     --master=tcp:127.0.0.1:5770 \
     --out="127.0.0.1:$ROUTER_PORT_2" \
-    "${GCS_OUTPUT[@]}" \
+    "${MAVPROXY_GCS_OUTPUT[@]}" \
+    --daemon
+start_process mavproxy-drone-3 "$PYTHON_BIN" "$MAVPROXY_SCRIPT" \
+    --master=tcp:127.0.0.1:5780 \
+    --out="127.0.0.1:$ROUTER_PORT_3" \
+    "${MAVPROXY_GCS_OUTPUT[@]}" \
     --daemon
 
-printf '\nTwo-drone mesh simulation is running.\n'
+printf '\nThree-drone mesh simulation is running.\n'
 printf 'Peer telemetry logs: %s/receiver-drone-*.log\n' "$STATE_ROOT"
 printf 'All logs: %s\n' "$STATE_ROOT"
-printf 'Connect Mission Planner using UDP port 14550. Press Ctrl+C here to stop the stack.\n'
+printf 'Connect Mission Planner using UDP port %s. Press Ctrl+C here to stop the stack.\n' "$GCS_PORT"
 
 while true; do
     for index in "${!PROCESS_PIDS[@]}"; do
