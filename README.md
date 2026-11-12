@@ -384,7 +384,7 @@ cd ~/ProjectEcho
 
 ### Start the Telemetry Receivers
 
-- Place the receiver script at `~/ProjectEcho/telemetry_poc/receiver.py`
+- The receiver script is `~/ProjectEcho/telemetry_poc/receiver.py`
 - Confirm that `pymavlink` is available to Python
 
 ```bash
@@ -485,6 +485,79 @@ land
 - During a simulated takeoff to 3 m and landing, the shared receiver showed System 2's altitude rise to about 3 m and return to about 0 m, while System 1 remained near 0 m
 - This test used local UDP forwarding through `127.0.0.1`. Each SITL instance sent telemetry directly to the receiver; neither drone relayed the other drone's messages. This test does not demonstrate a wireless mesh network, communication range, packet loss, or latency.
 
+### Simulated Mesh Telemetry
+
+`telemetry_poc/mesh_router.py` simulates a local, position-aware telemetry mesh.
+It reads MAVLink telemetry sent by each drone's MAVProxy instance, forms links
+between nodes whose latest reported positions are within radio range, and
+forwards `HEARTBEAT` and `GLOBAL_POSITION_INT` messages to reachable peer
+receivers. Relaying is store-and-forward with a configurable hop limit. Each
+hop applies bandwidth serialization, latency, and seeded packet loss.
+
+This is a configurable network approximation, not a radio propagation or
+obstacle model. It uses the drones' MAVLink-reported positions and only forwards
+the two telemetry message types shown by the receiver above; it does not forward
+arming, mode-change, or other command messages into either flight controller.
+The router is a centralized local emulator: SITL sends telemetry to it over
+loopback, and its per-node output port is a peer-consumer socket (the
+`receiver.py` instance below), not an ArduPilot input. A companion process can
+consume telemetry from that socket if needed.
+
+#### Start the mesh router and peer receivers
+
+- Start the two-drone Gazebo and SITL setup described above.
+- Open a terminal for the mesh router:
+
+```bash
+cd ~/ProjectEcho/telemetry_poc
+python3 mesh_router.py \
+  --node 1:14610:14620 \
+  --node 2:14611:14621 \
+  --range-m 100 \
+  --bandwidth 57600 \
+  --latency-ms 20 \
+  --packet-loss 0.01 \
+  --max-hops 4
+```
+
+Each `--node` value is `SYSTEM_ID:MAVPROXY_INPUT_PORT:PEER_RECEIVER_PORT`.
+The ports must be unique. For this example, Drone 1's telemetry enters the
+router on port `14610` and peer telemetry for Drone 1 is delivered to port
+`14620`; Drone 2 uses ports `14611` and `14621`.
+
+- In Drone 1's MAVProxy terminal, add the router input:
+
+```text
+output add 127.0.0.1:14610
+```
+
+- In Drone 2's MAVProxy terminal, add its router input:
+
+```text
+output add 127.0.0.1:14611
+```
+
+- Start one peer receiver for each drone:
+
+```bash
+cd ~/ProjectEcho/telemetry_poc
+python3 receiver.py --port 14620
+```
+
+```bash
+cd ~/ProjectEcho/telemetry_poc
+python3 receiver.py --port 14621
+```
+
+With the drones within range and both position reports fresh, each receiver
+should show telemetry from the other drone. Lower `--range-m` below their
+reported separation to break the link; raise it to restore the link. To test
+loss and delay, adjust `--packet-loss` and `--latency-ms`. The random loss
+sequence is repeatable with the same `--seed` and same packet ordering. A node
+whose last position is older than `--position-timeout` seconds is excluded from
+the mesh. When adding more drones, give each a unique system ID and pair of
+unused ports with another `--node` option.
+
 ## Mission Planner Setup
 
 Mission Planner runs on Windows and connects to both SITL instances through UDP.
@@ -580,10 +653,8 @@ A value near 1.0 indicates the simulation is running close to real time.
 
 ## Future Work
 
-- Add a third simulated drone
-- Simulate communication between drones
-- Simulate communication range and connection loss
-- Implement mesh networking between drones
+- Add and test a third simulated drone to demonstrate multi-hop relay
+- Add terrain/obstacle-aware propagation and configurable radio link profiles
   
 ## Credits
 - [Gavin Ebel](https://github.com/Gav0822)
